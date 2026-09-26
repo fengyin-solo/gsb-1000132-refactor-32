@@ -18,6 +18,15 @@
       </article>
     </div>
 
+    <form v-if="showCreate" class="filter-bar" @submit.prevent="submitCreate">
+      <label v-for="field in createFields" :key="field" class="filter-item">
+        <span>{{ field }}</span>
+        <input v-model="createForm[field]" :placeholder="createPlaceholder(field)" />
+      </label>
+      <button class="btn primary" type="submit">提交登记</button>
+      <button class="btn ghost" type="button" @click="cancelCreate">取消</button>
+    </form>
+
     <form class="filter-bar" @submit.prevent="reload">
       <label v-for="field in filterFields" :key="field" class="filter-item">
         <span>{{ field }}</span>
@@ -66,6 +75,7 @@
 import { onMounted, ref } from 'vue'
 
 import { request } from '@/api/client'
+import { NUMBER_FIELD_RULES, REQUIRED_FIELDS, validateEnvironmentEntry } from '@/utils/entryValidation'
 
 type Row = Record<string, string | number | null>
 
@@ -80,6 +90,9 @@ const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+const showCreate = ref(false)
+const createForm = ref<Record<string, string>>({})
+const createFields = REQUIRED_FIELDS
 
 function resetFilters() {
   filters.value = {}
@@ -90,8 +103,44 @@ function exportRows() {
   window.open(`${ENDPOINT}/export`, '_blank')
 }
 
+function createPlaceholder(field: string) {
+  const rule = NUMBER_FIELD_RULES[field]
+  return rule ? `请输入${field}（${rule.min}~${rule.max}${rule.unit}）` : `请输入${field}`
+}
+
 function openCreate() {
-  errorMessage.value = '环境记录登记入口尚未接入审批流'
+  errorMessage.value = ''
+  createForm.value = {}
+  showCreate.value = true
+}
+
+function cancelCreate() {
+  showCreate.value = false
+  createForm.value = {}
+}
+
+async function submitCreate() {
+  errorMessage.value = ''
+  const existingCodes = rows.value.map((row) => String(row['记录编号'] ?? '').trim())
+  const { cleaned, problems } = validateEnvironmentEntry(createForm.value, existingCodes)
+  if (problems.length) {
+    errorMessage.value = problems.join('；')
+    return
+  }
+  try {
+    const response = await request(ENDPOINT, {
+      method: 'POST',
+      body: JSON.stringify({ values: cleaned }),
+    })
+    const payload = await response.json()
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload?.message ?? '环境记录登记失败，请稍后重试')
+    }
+    cancelCreate()
+    await reload()
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '环境记录登记失败'
+  }
 }
 
 async function runAction(action: string, row: Row) {
@@ -99,10 +148,11 @@ async function runAction(action: string, row: Row) {
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ values: { action } }),
     })
-    if (!response.ok) {
-      throw new Error('环境监测动作未生效，请稍后重试')
+    const payload = await response.json()
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload?.message ?? '环境监测动作未生效，请稍后重试')
     }
     await reload()
   } catch (error) {

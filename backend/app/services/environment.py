@@ -1,12 +1,12 @@
-"""环境监测业务规则：状态流转、字段校验与筛选口径都收在这里。"""
+"""环境监测业务规则：状态流转与筛选口径收在这里，登记校验走 app.validation 共用口径。"""
 from __future__ import annotations
 
 from typing import Any
 
 from app.store import store
+from app.validation import validate_environment_entry
 
 MODULE = "environment"
-REQUIRED_FIELDS = ["记录编号", "监测区域", "温度值"]
 STATUS_ORDER = ["正常", "预警", "超标", "已恢复"]
 ACTION_RULES = {"登记预警": "预警", "确认超标": "超标", "标记恢复": "已恢复"}
 NEGATIVE_ACTIONS = []
@@ -34,12 +34,13 @@ class EnvironmentService:
         return store.find(MODULE, entry_id)
 
     def create_entry(self, values: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
-        missing = [field for field in REQUIRED_FIELDS if not str(values.get(field) or "").strip()]
-        if missing:
-            return None, missing
         rows = store.rows(MODULE)
+        existing_codes = [str(row.get("记录编号") or "").strip() for row in rows]
+        cleaned, problems = validate_environment_entry(values, existing_codes=existing_codes)
+        if problems:
+            return None, problems
         entry = {"id": max((int(row.get("id", 0)) for row in rows), default=0) + 1}
-        entry.update({field: values.get(field) for field in REQUIRED_FIELDS})
+        entry.update(cleaned)
         entry["status"] = STATUS_ORDER[0]
         entry["pending"] = True
         entry["abnormal"] = False
