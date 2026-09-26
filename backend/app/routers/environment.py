@@ -41,10 +41,11 @@ def get_entry(entry_id: int) -> dict:
 
 @router.post("", response_model=ActionResult)
 def create_entry(payload: EntryPayload) -> ActionResult:
-    """登记一条环境记录，缺字段时说明原因而不是静默丢弃。"""
-    entry, missing = service.create_entry(payload.values)
-    if missing:
-        return ActionResult(ok=False, message=f"缺少必填字段：{'、'.join(missing)}")
+    """登记一条环境记录；缺失、超限、重复、异常值按共用校验规则给出统一说明。"""
+    entry, issues = service.create_entry(payload.values)
+    if issues:
+        errors = [{"field": issue.field, "code": issue.code, "message": issue.message} for issue in issues]
+        return ActionResult(ok=False, message="；".join(issue.message for issue in issues), errors=errors)
     return ActionResult(ok=True, message="环境记录已登记", entry=entry)
 
 

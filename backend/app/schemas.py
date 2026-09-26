@@ -19,6 +19,8 @@ class ActionResult(BaseModel):
     ok: bool
     message: str
     entry: dict[str, Any] | None = None
+    # 校验未通过时的逐条说明（field/code/message），与共用校验模块的结论一一对应
+    errors: list[dict[str, str]] | None = None
 
 
 class EntryPayload(BaseModel):

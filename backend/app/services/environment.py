@@ -4,12 +4,21 @@ from __future__ import annotations
 from typing import Any
 
 from app.store import store
+from app.validation import FieldIssue, FieldRule, validate_entry
 
 MODULE = "environment"
-REQUIRED_FIELDS = ["记录编号", "监测区域", "温度值"]
 STATUS_ORDER = ["正常", "预警", "超标", "已恢复"]
 ACTION_RULES = {"登记预警": "预警", "确认超标": "超标", "标记恢复": "已恢复"}
-NEGATIVE_ACTIONS = []
+NEGATIVE_ACTIONS: list[str] = []
+
+# 记录编号、监测区域、温度值、湿度值的登记规则：页面与接口共用这一份结论，
+# 前端镜像在 frontend/src/validation/environment.ts，改动时两边一起改。
+FIELD_RULES = [
+    FieldRule("记录编号", required=True, unique=True),
+    FieldRule("监测区域", required=True),
+    FieldRule("温度值", required=True, numeric=True, minimum=-50, maximum=50),
+    FieldRule("湿度值", numeric=True, minimum=0, maximum=100),
+]
 
 
 class EnvironmentService:
@@ -33,13 +42,16 @@ class EnvironmentService:
     def get_entry(self, entry_id: int) -> dict[str, Any] | None:
         return store.find(MODULE, entry_id)
 
-    def create_entry(self, values: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
-        missing = [field for field in REQUIRED_FIELDS if not str(values.get(field) or "").strip()]
-        if missing:
-            return None, missing
+    def create_entry(self, values: dict[str, Any]) -> tuple[dict[str, Any] | None, list[FieldIssue]]:
         rows = store.rows(MODULE)
+        issues = validate_entry(values, FIELD_RULES, existing_rows=rows)
+        if issues:
+            return None, issues
         entry = {"id": max((int(row.get("id", 0)) for row in rows), default=0) + 1}
-        entry.update({field: values.get(field) for field in REQUIRED_FIELDS})
+        for rule in FIELD_RULES:
+            text = str(values.get(rule.name) if values.get(rule.name) is not None else "").strip()
+            if text:
+                entry[rule.name] = text
         entry["status"] = STATUS_ORDER[0]
         entry["pending"] = True
         entry["abnormal"] = False

@@ -4,12 +4,21 @@ from __future__ import annotations
 from typing import Any
 
 from app.store import store
+from app.validation import FieldRule, validate_entry
 
 MODULE = "calibration"
-REQUIRED_FIELDS = ["记录编号", "仪器编号", "校准机构"]
 STATUS_ORDER = ["待校准", "校准中", "已合格", "不合格"]
 ACTION_RULES = {"执行校准": "校准中", "标记合格": "已合格", "标记不合格": "不合格"}
-NEGATIVE_ACTIONS = []
+NEGATIVE_ACTIONS: list[str] = []
+
+# 必填字段走共用校验，判定口径与环境监测等模块保持一致
+FIELD_RULES = [
+    FieldRule("记录编号", required=True),
+    FieldRule("仪器编号", required=True),
+    FieldRule("校准机构", required=True),
+]
+# 登记时落库的字段
+STORED_FIELDS = [rule.name for rule in FIELD_RULES]
 
 
 class CalibrationService:
@@ -34,12 +43,13 @@ class CalibrationService:
         return store.find(MODULE, entry_id)
 
     def create_entry(self, values: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
-        missing = [field for field in REQUIRED_FIELDS if not str(values.get(field) or "").strip()]
+        issues = validate_entry(values, FIELD_RULES)
+        missing = [issue.field for issue in issues if issue.code == "missing"]
         if missing:
             return None, missing
         rows = store.rows(MODULE)
         entry = {"id": max((int(row.get("id", 0)) for row in rows), default=0) + 1}
-        entry.update({field: values.get(field) for field in REQUIRED_FIELDS})
+        entry.update({field: values.get(field) for field in STORED_FIELDS})
         entry["status"] = STATUS_ORDER[0]
         entry["pending"] = True
         entry["abnormal"] = False
